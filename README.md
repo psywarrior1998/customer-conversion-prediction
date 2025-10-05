@@ -1,3 +1,5 @@
+[![Hugging Face Model](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-lg-dark.svg)](https://huggingface.co/psyrishi/marketing-conversion-predictor)
+
 # Customer Conversion Prediction for Digital Marketing
 
 An end-to-end machine learning project to predict customer conversion in digital marketing campaigns, aimed at optimizing Return on Ad Spend (ROAS).

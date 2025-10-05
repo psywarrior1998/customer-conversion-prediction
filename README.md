@@ -132,9 +132,9 @@ To run this project on your local machine, follow these steps:
 
 ## 📁 Repository Structure
 
----
+```
 .
 ├── Digital_Marketing_Campaign_Prediction.ipynb     \# The main notebook with all analysis and code
 ├── requirements.txt                                \# A file listing all the necessary Python libraries
 └── README.md                                       \# You are here!
-
+```

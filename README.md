@@ -1,5 +1,5 @@
 [![Hugging Face Model](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-lg-dark.svg)](https://huggingface.co/psyrishi/marketing-conversion-predictor)
-
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://customer-conversion-prediction.streamlit.app/)
 # Customer Conversion Prediction for Digital Marketing
 
 An end-to-end machine learning project to predict customer conversion in digital marketing campaigns, aimed at optimizing Return on Ad Spend (ROAS).
@@ -73,6 +73,8 @@ The project followed a systematic, end-to-end machine learning pipeline:
 ## 🛠️ Technology Stack
 
 -   **Programming Language**: Python 3.x
+-   **Web Framework**: Streamlit (for model deployment and user interface)
+-   **Model Hosting**: Hugging Face Hub
 -   **Core Libraries**: Pandas, NumPy, Scikit-learn
 -   **Gradient Boosting**: XGBoost, LightGBM, CatBoost
 -   **Hyperparameter Tuning**: Optuna
@@ -99,6 +101,18 @@ The SHAP analysis revealed the most influential factors driving customer convers
 2.  **PreviousPurchases**: Past purchasing behavior is a very strong indicator of future conversions.
 3.  **LoyaltyPoints**: Customers with more loyalty points are significantly more likely to convert.
 4.  **EngagementScore**: Our engineered feature proved to be a top predictor, validating its effectiveness.
+
+---
+
+## 🌐 Live Web Application
+
+Explore the model interactively through the deployed Streamlit web application:
+**[Launch App](https://customer-conversion-prediction.streamlit.app/)**
+
+The web app allows marketers to:
+* **Input Customer Data**: Manually enter demographic details (Age, Income) and campaign engagement metrics (Time on Site, Pages Per Visit).
+* **Get Real-Time Predictions**: Instantly see if a customer is likely to convert based on the final ensemble model.
+* **View Confidence Scores**: Understand the model's certainty regarding the prediction.
 
 ---
 

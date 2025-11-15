@@ -4,40 +4,58 @@ import numpy as np
 import joblib
 import time
 import warnings
+from datetime import datetime
 from huggingface_hub import hf_hub_download
 
-# --- 0. Global Configuration & Warning Suppression ---
-st.set_page_config(page_title="ShopSense AI | Behavioral Predictor", page_icon="🛍️", layout="wide")
-warnings.filterwarnings("ignore") # Suppress sklearn version warnings for cleaner demo
+# --- 0. GLOBAL CONFIG & STYLES ---
+st.set_page_config(page_title="ShopSense AI | Behavioral Intelligence", page_icon="🧠", layout="wide")
+warnings.filterwarnings("ignore") # Keep UI clean
 
 # Constants
 REPO_ID = "psyrishi/marketing-conversion-predictor"
 FILENAME = "conversion_prediction_model.pkl"
 OPTIMAL_THRESHOLD = 0.2136
 
-# --- 1. Data & Model Logic ---
+# Mock Database
+PRODUCTS = [
+    {"id": 1, "name": "Noise-Cancel Buds", "price": 149, "cat": "Tech", "img": "🎧", "desc": "Immersive sound, 24h battery."},
+    {"id": 2, "name": "ErgoSmart Watch", "price": 399, "cat": "Tech", "img": "⌚", "desc": "Track health, calls, and more."},
+    {"id": 3, "name": "Runner Pro Sneakers", "price": 120, "cat": "Fashion", "img": "👟", "desc": "Aerodynamic design for speed."},
+    {"id": 4, "name": "Leather Satchel", "price": 250, "cat": "Fashion", "img": "🎒", "desc": "Handcrafted Italian leather."},
+    {"id": 5, "name": "4K Action Cam", "price": 299, "cat": "Tech", "img": "📷", "desc": "Waterproof, stabilization enabled."},
+    {"id": 6, "name": "Organic Tee", "price": 35, "cat": "Fashion", "img": "👕", "desc": "100% sustainable cotton."},
+]
+
+# --- 1. BACKEND LOGIC ---
 @st.cache_resource
 def load_model():
-    """Downloads and loads the model with error handling."""
+    """Loads model with robust error handling for version mismatches."""
     import sklearn.compose._column_transformer as ct
-    
-    # Backward compatibility patch
     if not hasattr(ct, "_RemainderColsList"):
         class _RemainderColsList(list): pass
         ct._RemainderColsList = _RemainderColsList
 
     try:
-        with st.spinner(f"🧠 Awakening AI Brain..."):
+        with st.spinner("🔌 Connecting to AI Inference Engine..."):
             model_path = hf_hub_download(repo_id=REPO_ID, filename=FILENAME)
-            model = joblib.load(model_path)
-        return model
+            return joblib.load(model_path)
     except Exception as e:
-        st.error(f"⚠️ Model Error: {e}")
+        st.error(f"⚠️ Core AI Error: {e}\n\n*Action: Retrain model.pkl to fix scikit-learn version conflict.*")
         return None
 
-def apply_feature_engineering(df):
-    """Replicates training transformations."""
-    df = df.copy()
+def prepare_input_data(persona, engagement_stats):
+    """Merges static persona data with dynamic session data."""
+    data = persona.copy()
+    
+    # Dynamic Calculation
+    data['TimeOnSite'] = engagement_stats['time_mins']
+    data['PagesPerVisit'] = engagement_stats['pages']
+    data['WebsiteVisits'] = engagement_stats['pages'] # Proxy for session depth
+    # Cart items count as "Social Shares" proxy for high-intent interaction in this demo model
+    data['SocialShares'] = engagement_stats['social_actions'] + engagement_stats['cart_count']
+    
+    # Feature Engineering Pipeline (Replicated from Training)
+    df = pd.DataFrame([data])
     df['EngagementScore'] = df['TimeOnSite'] * df['PagesPerVisit']
     df['WebsiteVisits_safe'] = df['WebsiteVisits'].replace(0, 1)
     df['CostPerVisit'] = df['AdSpend'] / df['WebsiteVisits_safe']
@@ -45,261 +63,289 @@ def apply_feature_engineering(df):
     
     df['AgeGroup'] = pd.cut(df['Age'], bins=[17, 30, 50, 70], labels=['Young', 'Adult', 'Senior'], right=True, include_lowest=True)
     df['IncomeTier'] = pd.cut(df['Income'], bins=[19999, 50000, 90000, 150000], labels=['Low', 'Medium', 'High'], right=True, include_lowest=True)
+    
     return df
 
-def predict_conversion(model, data):
-    """Generates prediction probability."""
+def get_prediction(model, df):
+    """Returns prediction class and probability."""
     try:
-        processed_data = apply_feature_engineering(data)
         feature_order = ['Age', 'Gender', 'Income', 'CampaignChannel', 'CampaignType', 'AdSpend',
                          'ClickThroughRate', 'ConversionRate', 'WebsiteVisits', 'PagesPerVisit',
                          'TimeOnSite', 'SocialShares', 'EmailOpens', 'EmailClicks',
                          'PreviousPurchases', 'LoyaltyPoints', 'EngagementScore', 'CostPerVisit',
                          'AgeGroup', 'IncomeTier']
-
-        proba = model.predict_proba(processed_data[feature_order])[:, 1]
-        prediction = (proba >= OPTIMAL_THRESHOLD).astype(int)[0]
-        return prediction, proba[0]
+        
+        proba = model.predict_proba(df[feature_order])[:, 1][0]
+        pred = (proba >= OPTIMAL_THRESHOLD).astype(int)
+        return pred, proba
     except Exception as e:
-        st.error(f"Prediction Calculation Error: {e}")
+        st.error(f"Inference Failed: {e}")
         return 0, 0.0
 
-# --- 2. Mock Database ---
-PRODUCTS = [
-    {"id": 1, "name": "Noise-Cancel Buds", "price": 149, "img": "🎧", "cat": "Tech"},
-    {"id": 2, "name": "ErgoSmart Watch", "price": 399, "img": "⌚", "cat": "Tech"},
-    {"id": 3, "name": "Runner Pro Sneakers", "price": 120, "img": "👟", "cat": "Fashion"},
-    {"id": 4, "name": "Leather Satchel", "price": 250, "img": "🎒", "cat": "Fashion"},
-    {"id": 5, "name": "4K Action Cam", "price": 299, "img": "📷", "cat": "Tech"},
-    {"id": 6, "name": "Organic Tee", "price": 35, "img": "👕", "cat": "Fashion"},
-]
+# --- 2. SESSION STATE ---
+def init_session():
+    defaults = {
+        'page_views': 0, 'cart': [], 'start_time': None, 'active': False, 
+        'persona': {}, 'social_clicks': 0, 'log': [], 'time_warp': 1.0
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state: st.session_state[k] = v
 
-# --- 3. Session State Management ---
-defaults = {
-    'page_views': 0, 'cart': [], 'start_time': None, 
-    'session_active': False, 'persona': {}, 'social_clicks': 0
-}
-for key, val in defaults.items():
-    if key not in st.session_state: st.session_state[key] = val
+def log_action(action, icon="🔹"):
+    """Adds an event to the session timeline."""
+    ts = datetime.now().strftime("%H:%M:%S")
+    st.session_state.log.insert(0, f"`{ts}` {icon} {action}")
 
-# --- 4. Sidebar & Navigation ---
+init_session()
 model = load_model()
 
+# --- 3. SIDEBAR CONTROL PANEL ---
 with st.sidebar:
     st.title("🛍️ ShopSense AI")
-    app_mode = st.radio("Mode:", ["🛒 Live Store Simulator", "⚙️ Manual Calculator"], index=0)
+    st.caption("Real-time Behavioral Prediction Engine")
+    
+    mode = st.radio("System Mode:", ["🛒 Store Simulator", "⚙️ Model Admin"], label_visibility="collapsed")
     st.divider()
-    
-    # Live Tracker Panel
-    if app_mode == "🛒 Live Store Simulator" and st.session_state.session_active:
-        st.subheader("🕵️ Live Tracking")
+
+    # LIVE SESSION TRACKER
+    if mode == "🛒 Store Simulator" and st.session_state.active:
+        st.subheader("🕵️ Session Telemetry")
         
-        # Timer
-        elapsed = time.time() - st.session_state.start_time
-        mins, secs = divmod(int(elapsed), 60)
-        st.metric("⏱️ Time on Site", f"{mins:02d}:{secs:02d}")
+        # Time Warp Logic
+        real_sec = time.time() - st.session_state.start_time
+        sim_min = (real_sec * st.session_state.time_warp) / 60
         
-        # Stats
         c1, c2 = st.columns(2)
-        c1.metric("Page Views", st.session_state.page_views)
-        cart_total = sum(p['price'] for p in st.session_state.cart)
-        c2.metric("Cart Total", f"${cart_total}")
+        c1.metric("Simulated Time", f"{sim_min:.1f}m")
+        c2.metric("Page Views", st.session_state.page_views)
         
-        # Cart Display
-        if st.session_state.cart:
-            st.caption("🛒 Cart Items:")
-            for item in st.session_state.cart:
-                st.text(f"- {item['name']} (${item['price']})")
-        
+        cart_val = sum(p['price'] for p in st.session_state.cart)
+        st.metric("🛒 Cart Value", f"${cart_val}", delta=f"{len(st.session_state.cart)} items")
+
+        # Journey Log
+        with st.expander("📜 User Journey Log", expanded=True):
+            for entry in st.session_state.log[:8]: # Show last 8 actions
+                st.markdown(entry)
+            if len(st.session_state.log) > 8:
+                st.caption("... earlier events hidden")
+
         st.divider()
-        if st.button("🛑 Quit Session"):
-            st.session_state.session_active = False
+        if st.button("🛑 End Simulation", use_container_width=True):
+            st.session_state.active = False
             st.rerun()
 
 # =========================================================
-# INTERFACE 1: LIVE STORE SIMULATOR
+# VIEW 1: STORE SIMULATOR (The "Product")
 # =========================================================
-if app_mode == "🛒 Live Store Simulator":
-    
-    # --- A. SETUP SCREEN (Persona Selection) ---
-    if not st.session_state.session_active:
-        st.title("🛒 Customer Simulation Lab")
-        st.markdown("### Who is visiting the store today?")
-        
-        # The 4 Options
-        persona_opts = [
-            "1️⃣ The Window Shopper (Low Intent)",
-            "2️⃣ The Focused Buyer (Mid Intent)",
-            "3️⃣ The Whale / Big Spender (High Intent)",
-            "4️⃣ ✨ Custom / Build Your Own"
-        ]
-        
-        selection = st.radio("Select a Persona:", persona_opts, index=1, horizontal=False)
-        st.divider()
+if mode == "🛒 Store Simulator":
 
-        # Logic for Personas
-        if selection == persona_opts[0]: # Window Shopper
-            p_age, p_income, p_gender, p_loyalty = 22, 25000, "Female", 0
-            st.info(f"**Profile:** Student, Budget Conscious. Unlikely to convert without heavy incentives.")
+    # --- PHASE A: CONFIGURATION ---
+    if not st.session_state.active:
+        st.title("🛒 Customer Experience Lab")
+        st.markdown("Configure the visitor profile to test how the AI reacts to different demographics and behaviors.")
+        
+        c1, c2 = st.columns([1, 1])
+        
+        with c1:
+            st.subheader("1. Visitor Persona")
+            p_type = st.selectbox("Select Profile:", 
+                ["👱‍♀️ The Window Shopper (Low Intent)", 
+                 "👨‍💼 The Focused Buyer (Mid Intent)", 
+                 "👩‍💻 The Tech Whale (High Intent)", 
+                 "✨ Custom Profile"])
             
-        elif selection == persona_opts[1]: # Focused Buyer
-            p_age, p_income, p_gender, p_loyalty = 35, 65000, "Male", 500
-            st.success(f"**Profile:** Average professional. Good income. Loyal customer. Conversion likely with engagement.")
-            
-        elif selection == persona_opts[2]: # Whale
-            p_age, p_income, p_gender, p_loyalty = 50, 180000, "Female", 5000
-            st.warning(f"**Profile:** High net worth. Historical big spender. Very high conversion probability.")
-            
-        else: # Custom
-            st.subheader("🛠️ Build Custom Profile")
-            c1, c2, c3 = st.columns(3)
-            p_age = c1.number_input("Age", 18, 90, 28)
-            p_gender = c2.selectbox("Gender", ["Male", "Female"])
-            p_income = c3.number_input("Income ($)", 0, 1000000, 50000, step=5000)
-            p_loyalty = st.slider("Loyalty Points (Past Engagement)", 0, 10000, 100)
+            if "Window Shopper" in p_type:
+                p_data = {'Age': 22, 'Income': 25000, 'Gender': 'Female', 'Loyalty': 0}
+            elif "Focused Buyer" in p_type:
+                p_data = {'Age': 35, 'Income': 75000, 'Gender': 'Male', 'Loyalty': 500}
+            elif "Tech Whale" in p_type:
+                p_data = {'Age': 45, 'Income': 180000, 'Gender': 'Female', 'Loyalty': 5000}
+            else:
+                s1, s2 = st.columns(2)
+                p_age = s1.number_input("Age", 18, 80, 30)
+                p_gen = s2.selectbox("Gender", ["Male", "Female"])
+                p_inc = st.number_input("Income ($)", 15000, 500000, 60000, step=5000)
+                p_loy = st.slider("Loyalty Pts", 0, 10000, 0)
+                p_data = {'Age': p_age, 'Income': p_inc, 'Gender': p_gen, 'Loyalty': p_loy}
 
-        # "Enter Store" Button
-        if st.button("🚀 Start Simulation", type="primary", use_container_width=True):
-            st.session_state.session_active = True
-            st.session_state.start_time = time.time()
-            st.session_state.page_views = 1 # Landing page count
-            st.session_state.cart = []
-            st.session_state.social_clicks = 0
-            
-            # Save Persona
-            st.session_state.persona = {
-                'Age': p_age, 'Gender': p_gender, 'Income': p_income, 'LoyaltyPoints': p_loyalty,
-                # Default marketing context
+            # Add default hidden marketing fields
+            p_data.update({
                 'CampaignChannel': 'Direct', 'CampaignType': 'Organic', 'AdSpend': 0,
-                'ClickThroughRate': 0, 'ConversionRate': 0, 'EmailOpens': 0, 'EmailClicks': 0, 
-                'PreviousPurchases': 1 if p_loyalty > 0 else 0
-            }
-            st.rerun()
+                'ClickThroughRate': 0.0, 'ConversionRate': 0.0, 'EmailOpens': 0, 'EmailClicks': 0,
+                'PreviousPurchases': 1 if p_data['Loyalty'] > 0 else 0
+            })
+        
+        with c2:
+            st.subheader("2. Simulation Settings")
+            st.info("💡 **Time Warp:** Speed up the clock to simulate a 20-minute browse in just 20 seconds.")
+            speed = st.select_slider("Time Speed:", options=[1, 10, 60, 600], value=60, format_func=lambda x: f"{x}x Speed")
+            
+            st.write("##")
+            if st.button("🚀 Launch Store Simulator", type="primary", use_container_width=True):
+                st.session_state.active = True
+                st.session_state.start_time = time.time()
+                st.session_state.time_warp = speed
+                st.session_state.page_views = 1
+                st.session_state.cart = []
+                st.session_state.log = []
+                st.session_state.social_clicks = 0
+                st.session_state.persona = p_data
+                log_msg = f"Session Started: {p_data['Gender']}, {p_data['Age']}yo, ${p_data['Income']:,}"
+                log_action(log_msg, "🟢")
+                st.rerun()
 
-    # --- B. ACTIVE STORE SCREEN ---
+    # --- PHASE B: THE STORE INTERFACE ---
     else:
-        # Simulated Navbar
-        col1, col2 = st.columns([4, 1])
-        with col1: st.title("🛍️ ShopSense Demo Store")
-        with col2: st.info(f"👤 {st.session_state.persona['Gender']}, {st.session_state.persona['Age']}yo")
+        # HUD (Head-Up Display)
+        st.caption(f"LOGGED IN AS: **{st.session_state.persona['Gender']}, {st.session_state.persona['Age']}**")
+        
+        # Store Navigation
+        tab_home, tab_shop, tab_social, tab_pay = st.tabs(["🏠 Home", "🛍️ Shop", "❤️ Social", "💳 Checkout"])
 
-        # Store Tabs
-        tab1, tab2, tab3 = st.tabs(["🏠 Home Feed", "📦 Catalog", "💳 Checkout"])
-
-        # Tab 1: Home
-        with tab1:
-            st.image("https://placehold.co/1200x400?text=Spring+Collection+Live", use_column_width=True)
-            c1, c2 = st.columns(2)
+        # 1. HOME TAB
+        with tab_home:
+            st.image("https://placehold.co/1200x350/232F3E/FFF?text=Spring+Collection+Live", use_container_width=True)
+            c1, c2, c3 = st.columns(3)
             with c1:
-                if st.button("🔥 View Hot Deals"):
+                if st.button("🔥 View Flash Deals"):
                     st.session_state.page_views += 1
-                    st.toast("Browsing Deals (+1 Page View)")
+                    log_action("Browsed Flash Deals", "🔥")
+                    st.toast("Browsing Deals...")
             with c2:
-                if st.button("📢 Share Store on Social"):
-                    st.session_state.social_clicks += 1
-                    st.toast("Social Share Recorded! (+Engagement)")
+                if st.button("📖 Read Our Story"):
+                    st.session_state.page_views += 1
+                    log_action("Read About Us", "📖")
+            with c3:
+                if st.button("📞 Contact Support"):
+                    st.session_state.page_views += 1
+                    log_action("Visited Support Page", "📞")
 
-        # Tab 2: Catalog
-        with tab2:
-            st.caption("Click 'Add' to put items in cart. This increases your purchase intent score.")
-            rows = [st.columns(3), st.columns(3)]
-            for i, p in enumerate(PRODUCTS):
-                col = rows[i // 3][i % 3]
-                with col:
+        # 2. SHOP TAB
+        with tab_shop:
+            cat_filter = st.radio("Filter:", ["All", "Tech", "Fashion"], horizontal=True, label_visibility="collapsed")
+            
+            # Filter Logic
+            display_items = PRODUCTS if cat_filter == "All" else [p for p in PRODUCTS if p['cat'] == cat_filter]
+            
+            # Grid Layout
+            cols = st.columns(3)
+            for i, p in enumerate(display_items):
+                with cols[i % 3]:
                     with st.container(border=True):
-                        st.markdown(f"## {p['img']}")
+                        st.markdown(f"### {p['img']}")
                         st.write(f"**{p['name']}**")
-                        st.write(f"${p['price']}")
-                        if st.button(f"Add to Cart", key=f"add_{i}"):
+                        st.caption(p['desc'])
+                        st.write(f"**${p['price']}**")
+                        
+                        b1, b2 = st.columns(2)
+                        if b1.button("View", key=f"v_{p['id']}"):
+                            st.session_state.page_views += 1
+                            log_action(f"Viewed {p['name']}", "👀")
+                            st.toast(f"Viewing {p['name']}")
+                            
+                        if b2.button("Add", key=f"a_{p['id']}", type="primary"):
                             st.session_state.cart.append(p)
                             st.session_state.page_views += 1
-                            st.toast(f"Added {p['name']}!")
-                            time.sleep(0.2)
-                            st.rerun() # Force refresh sidebar
+                            log_action(f"Added {p['name']} to Cart", "🛒")
+                            st.toast("Added to Cart!")
+                            time.sleep(0.1) # UI sync
+                            st.rerun()
 
-        # Tab 3: Prediction/Checkout
-        with tab3:
-            st.write("### 🛒 Ready to Checkout?")
-            st.write(f"**Items in Cart:** {len(st.session_state.cart)}")
-            st.write(f"**Total Value:** ${sum(p['price'] for p in st.session_state.cart)}")
+        # 3. SOCIAL TAB
+        with tab_social:
+            st.info("Interacting here increases the 'SocialShares' signal to the model.")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.image("https://placehold.co/500x300?text=Instagram+Viral", use_container_width=True)
+                if st.button("❤️ Like on Instagram"):
+                    st.session_state.social_clicks += 1
+                    log_action("Liked Instagram Post", "❤️")
+            with c2:
+                st.image("https://placehold.co/500x300?text=TikTok+Trend", use_container_width=True)
+                if st.button("↗️ Share to Friends"):
+                    st.session_state.social_clicks += 2
+                    log_action("Shared Product Link", "🔗")
+        
+        # 4. CHECKOUT TAB
+        with tab_pay:
+            st.markdown("### 🧾 Checkout Counter")
             
-            st.divider()
-            
-            if st.button("✨ Analyze Behavior & Predict", type="primary", use_container_width=True):
-                # 1. Gather Live Metrics
-                duration_mins = (time.time() - st.session_state.start_time) / 60
-                if duration_mins < 0.01: duration_mins = 0.01 # Avoid zero errors
+            if not st.session_state.cart:
+                st.warning("Your cart is empty. Add items to generate a meaningful prediction.")
+            else:
+                # Live Stats
+                real_sec = time.time() - st.session_state.start_time
+                sim_min = (real_sec * st.session_state.time_warp) / 60
+                if sim_min < 0.1: sim_min = 0.1 # Avoid zero errors
                 
-                final_pages = st.session_state.page_views
+                stats = {
+                    'time_mins': sim_min,
+                    'pages': st.session_state.page_views,
+                    'cart_count': len(st.session_state.cart),
+                    'social_actions': st.session_state.social_clicks
+                }
                 
-                # 2. Build Final Input Data
-                # Merge Persona with Live Behavior
-                data = st.session_state.persona.copy()
-                data.update({
-                    'TimeOnSite': duration_mins,
-                    'PagesPerVisit': final_pages,
-                    'WebsiteVisits': final_pages,
-                    'SocialShares': st.session_state.social_clicks + len(st.session_state.cart) # Cart adds to engagement score
-                })
-                
-                # 3. Predict
-                if model:
-                    pred, prob = predict_conversion(model, pd.DataFrame([data]))
+                # Trigger Prediction
+                if st.button("✨ Analyze Behavior & Predict Conversion", type="primary", use_container_width=True):
                     
-                    st.divider()
-                    st.subheader("🧠 AI Analysis Report")
-                    
-                    # Display User Stats
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Income Tier", f"${data['Income']:,}")
-                    m2.metric("Time Spent", f"{duration_mins:.2f} min")
-                    m3.metric("Pages Viewed", final_pages)
-                    m4.metric("Engagement Score", f"{(duration_mins * final_pages):.1f}")
+                    if model:
+                        df_input = prepare_input_data(st.session_state.persona, stats)
+                        pred, prob = get_prediction(model, df_input)
+                        
+                        st.divider()
+                        st.subheader("🧠 AI Analysis Result")
+                        
+                        res_col1, res_col2 = st.columns([1.5, 1])
+                        
+                        with res_col1:
+                            # Key Drivers Analysis (Heuristic for Demo)
+                            st.markdown("#### 🔑 Key Drivers")
+                            
+                            # Income Driver
+                            inc = st.session_state.persona['Income']
+                            if inc > 80000: st.success("✅ **High Income:** Strong purchasing power.")
+                            elif inc < 30000: st.error("❌ **Low Income:** Budget constraint likely.")
+                            else: st.info("ℹ️ **Middle Income:** Neutral factor.")
+                            
+                            # Engagement Driver
+                            eng_score = df_input['EngagementScore'].iloc[0]
+                            if eng_score > 30: st.success(f"✅ **Deep Engagement:** Score {eng_score:.1f} (High Interest)")
+                            else: st.warning(f"⚠️ **Low Engagement:** Score {eng_score:.1f} (Browsing)")
+                            
+                            # Cart Driver
+                            if len(st.session_state.cart) > 2: st.success("✅ **High Intent:** Multiple items in cart.")
 
-                    # Display Prediction
-                    if pred == 1:
-                        st.success(f"## ✅ CONVERSION LIKELY (Probability: {prob:.1%})")
-                        st.balloons()
-                        st.markdown("""
-                        **Why?** This user fits the high-intent demographic and demonstrated strong engagement behavior.
-                        \n**Recommended Action:** Auto-apply a 10% coupon to close the sale immediately.
-                        """)
-                    else:
-                        st.error(f"## ❄️ CONVERSION UNLIKELY (Probability: {prob:.1%})")
-                        st.markdown("""
-                        **Why?** Despite browsing, the engagement time or demographic fit is currently too low.
-                        \n**Recommended Action:** Add to retargeting email list. Do not offer aggressive discounts yet.
-                        """)
+                        with res_col2:
+                            # The Score
+                            st.metric("Conversion Probability", f"{prob:.1%}")
+                            if pred == 1:
+                                st.success("## 🟢 LIKELY")
+                                st.balloons()
+                            else:
+                                st.error("## 🔴 UNLIKELY")
+                                st.progress(prob, "Probability")
 
 # =========================================================
-# INTERFACE 2: MANUAL CALCULATOR (Legacy)
+# VIEW 2: MODEL ADMIN (Debugging Tool)
 # =========================================================
-elif app_mode == "⚙️ Manual Calculator":
-    st.title("⚙️ Admin Prediction Tool")
-    st.write("Test specific data points manually.")
+elif mode == "⚙️ Model Admin":
+    st.title("⚙️ Model Stress Test")
+    st.write("Directly query the model with edge cases.")
     
-    with st.form("admin_form"):
-        c1, c2 = st.columns(2)
-        age = c1.number_input("Age", 18, 90, 30)
-        income = c2.number_input("Income", 0, 1000000, 60000)
-        gender = c1.selectbox("Gender", ["Male", "Female"])
+    with st.form("debug_form"):
+        c1, c2, c3 = st.columns(3)
+        age = c1.number_input("Age", 18, 100, 30)
+        income = c2.number_input("Income", 0, 1000000, 50000)
+        time_site = c3.number_input("Time (min)", 0.1, 500.0, 5.0)
         
-        st.divider()
-        c3, c4 = st.columns(2)
-        time_site = c3.number_input("Time on Site (min)", 0.0, 120.0, 5.0)
-        pages = c4.number_input("Pages Per Visit", 1.0, 50.0, 3.0)
-        
-        if st.form_submit_button("Calculate Probability"):
-            # Construct minimal valid dataframe
-            df = pd.DataFrame([{
-                'Age': age, 'Gender': gender, 'Income': income, 
-                'TimeOnSite': time_site, 'PagesPerVisit': pages,
-                'WebsiteVisits': pages, 'SocialShares': 0,
-                'CampaignChannel': 'Direct', 'CampaignType': 'None',
-                'AdSpend': 0, 'ClickThroughRate': 0, 'ConversionRate': 0,
-                'EmailOpens': 0, 'EmailClicks': 0, 'PreviousPurchases': 0, 'LoyaltyPoints': 0
-            }])
+        if st.form_submit_button("Run Inference"):
+            # Minimal data construction
+            p = {'Age': age, 'Income': income, 'Gender': 'Male', 'LoyaltyPoints': 100,
+                 'CampaignChannel': 'Direct', 'CampaignType': 'None', 'AdSpend': 0,
+                 'ClickThroughRate': 0, 'ConversionRate': 0, 'EmailOpens': 0, 'EmailClicks': 0, 
+                 'PreviousPurchases': 0}
+            s = {'time_mins': time_site, 'pages': 5, 'cart_count': 1, 'social_actions': 0}
             
-            if model:
-                pred, prob = predict_conversion(model, df)
-                st.metric("Conversion Probability", f"{prob:.1%}", delta="Convert" if pred else "No Convert")
+            df = prepare_input_data(p, s)
+            pred, prob = get_prediction(model, df)
+            st.code(f"Prediction: {pred}\nProbability: {prob:.4f}")
